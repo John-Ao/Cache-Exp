@@ -13,9 +13,9 @@ public:
 };
 
 class LRU :public Replacer {
-	int size_; // size must be power of 2
-	int size_bit_;
-	int nc_;
+	static int size_; // size must be power of 2
+	static int size_bit_;
+	static int nc_;
 	unsigned char* stack_;
 
 	int get(const int n) const { // get the n-th line of the stack
@@ -72,16 +72,20 @@ class LRU :public Replacer {
 	}
 
 public:
-	LRU(const int size) :size_(size) {
+	LRU() {
+		stack_ = new unsigned char[nc_];
+		for (auto i = 0; i < size_; ++i) {
+			set(i, i);
+		}
+	}
+
+	static void init(const int size) {
+		size_ = size;
 		size_bit_ = 0;
 		while ((1 << size_bit_) < size_) {
 			++size_bit_;
 		}
 		nc_ = (size_bit_ * size_ + 7) >> 3;
-		stack_ = new unsigned char[nc_];
-		for (auto i = 0; i < size_; ++i) {
-			set(i, i);
-		}
 	}
 
 	void visit(const int x) override { // push a number into the stack
@@ -118,9 +122,11 @@ public:
 };
 
 class Random :public Replacer {
-	int size_;
+	static int size_;
 public:
-	Random(int size) :size_(size) {}
+	static void init(const int size) {
+		size_ = size;
+	}
 	void visit(int n) override {}
 	int get_and_visit_victim() override {
 		return rand() % size_; // size不能超过RAND_MAX
@@ -128,9 +134,9 @@ public:
 };
 
 class BT :public Replacer {
-	int size_;
-	int nc_;
-	int h_; // height of tree
+	static int size_;
+	static int nc_;
+	static int h_; // height of tree
 	unsigned char* tree_;
 	bool get(const int n) const {
 		return tree_[n >> 3] & (1 << (n % 8));
@@ -144,10 +150,13 @@ class BT :public Replacer {
 		}
 	}
 public:
-	BT(int size) :size_(size) { // size must be power of 2
-		nc_ = (size_ + 6) >> 3; // only (size_-1) bits needed
+	BT() {
 		tree_ = new unsigned char[nc_];
 		memset(tree_, 0, nc_);
+	}
+	static void init(const int size) { // size must be power of 2
+		size_ = size;
+		nc_ = (size_ + 6) >> 3; // only (size_-1) bits needed
 		h_ = 0;
 		while ((1 << ++h_) < size_);
 	}
@@ -236,9 +245,17 @@ public:
 		case 1: //全相联，只有一个LRU
 			replacer_ = new Replacer*;
 			switch (replacing_algo_) {
-			case 0:*replacer_ = new LRU(n_); break;
-			case 1:*replacer_ = new Random(n_); break;
-			default:*replacer_ = new BT(n_); break;
+			case 0:
+				LRU::init(n_);
+				*replacer_ = new LRU();
+				break;
+			case 1:
+				Random::init(n_);
+				*replacer_ = new Random();
+				break;
+			default:BT::init(n_);
+				*replacer_ = new BT();
+				break;
 			}
 			break;
 		default: // 4-way or 8-way
@@ -248,12 +265,25 @@ public:
 			}
 			j = n_ >> ways_bit;
 			replacer_ = new Replacer * [j];
-			for (auto i = 0; i < j; ++i) {
-				switch (replacing_algo_) {
-				case 0:replacer_[i] = new LRU(ways); break;
-				case 1:replacer_[i] = new Random(ways); break;
-				default:replacer_[i] = new BT(ways); break;
+			switch (replacing_algo_) {
+			case 0:
+				LRU::init(ways);
+				for (auto i = 0; i < j; ++i) {
+					replacer_[i] = new LRU();
 				}
+				break;
+			case 1:
+				Random::init(ways);
+				for (auto i = 0; i < j; ++i) {
+					replacer_[i] = new Random();
+				}
+				break;
+			default:
+				BT::init(ways);
+				for (auto i = 0; i < j; ++i) {
+					replacer_[i] = new BT();
+				}
+				break;
 			}
 			break;
 		}
@@ -517,6 +547,14 @@ uint64_t hextoi(const char* str) { // convert base-16 to base-10
 	}
 }
 
+int LRU::size_ = 0;
+int LRU::size_bit_ = 0;
+int LRU::nc_ = 0;
+int Random::size_ = 0;
+int BT::size_ = 0;
+int BT::nc_ = 0;
+int BT::h_ = 0;
+
 #if false
 int main() {
 	srand(0); // 保证实验结果的可重复性
@@ -533,7 +571,8 @@ int main() {
 	char addr[15];
 	uint64_t iaddr;
 	bool hit;
-	Cache cache(8, 1, 2, 0);
+	int hit_count = 0, total_count = 0;
+	Cache cache(8, 0, 0, 1);
 	while (!trace_file.eof()) {
 		trace_file >> rw >> addr;
 		iaddr = hextoi(addr);
@@ -543,6 +582,10 @@ int main() {
 		else {
 			hit = cache.write(iaddr);
 		}
+		++total_count;
+		if(hit) {
+			++hit_count;
+		}
 		//if (hit) {
 		//	cout << "Hit" << endl;
 		//}
@@ -550,6 +593,9 @@ int main() {
 		//	cout << "Miss" << endl;
 		//}
 	}
+	cout << "[模拟结果]\n";
+	cout << "一共" << total_count << "次读/写操作，其中" << hit_count << "次命中，" << total_count - hit_count << "次缺失，命中率为" <<
+		double(hit_count) / total_count << "，缺失率为" << 1 - double(hit_count) / total_count << endl;
 	system("pause");
 	return 0;
 }
@@ -620,7 +666,8 @@ int main(int argc, char* argv[]) {
 		}
 	}
 	cout << "[模拟结果]\n";
-	cout << "一共" << total_count << "次读/写操作，其中" << hit_count << "次命中，" << total_count - hit_count << "次缺失，命中率为" << double(hit_count) / total_count << "，缺失率为" << 1 - double(hit_count) / total_count << endl;
+	cout << "一共" << total_count << "次读/写操作，其中" << hit_count << "次命中，" << total_count - hit_count << "次缺失，命中率为" <<
+		double(hit_count) / total_count << "，缺失率为" << 1 - double(hit_count) / total_count << endl;
 	return 0;
 }
 #endif
