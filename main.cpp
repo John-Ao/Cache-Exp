@@ -185,9 +185,10 @@ public:
 };
 
 class Cache {
-	char mapping_algo_;// 映射规则(直接映射，全关联，4-way组关联，8-way组关联)
+	int block_size_;// 块大小(bytes)
+	char mapping_algo_;// 映射规则(直接映射，4-way组关联，8-way组关联，全关联)
 	char replacing_algo_;// 替换算法(LRU，随机替换，二叉树替换)
-	char writing_algo_;// 写策略(写不分配+写直达，写分配+写回，写不分配+写回，写分配+写直达)
+	char writing_algo_;// 写策略(写不分配+写直达，写不分配+写回，写分配+写直达，写分配+写回)
 
 	bool has_dirty_; // whether there's a dirty bit
 	bool write_alloc_; // 是否写分配
@@ -202,7 +203,7 @@ class Cache {
 
 
 public:
-	Cache(const char block_size = 8, const char mapping_algo = 3, const char replacing_algo = 0, const char writing_algo = 1) : mapping_algo_(mapping_algo), replacing_algo_(replacing_algo), writing_algo_(writing_algo) {
+	Cache(const int block_size = 8, const char mapping_algo = 3, const char replacing_algo = 0, const char writing_algo = 1) : block_size_(block_size), mapping_algo_(mapping_algo), replacing_algo_(replacing_algo), writing_algo_(writing_algo) {
 		offset_len_ = 0;
 		while ((1 << offset_len_) < block_size) {
 			++offset_len_;
@@ -211,16 +212,16 @@ public:
 		index_len_ = Nbit - offset_len_;
 		switch (mapping_algo_) {
 		case 0:break;
-		case 1:index_len_ = 0; break;
-		case 2:index_len_ -= 2; break;
+		case 3:index_len_ = 0; break;
+		case 1:index_len_ -= 2; break;
 		default:index_len_ -= 3; break;
 		}
 
-		write_alloc_ = (writing_algo_ % 2 == 1);
+		write_alloc_ = (writing_algo_ >= 2);
 
 		tag_len_ = 64 - index_len_ - offset_len_;
 		length_ = tag_len_ + 1;
-		has_dirty_ = (writing_algo_ == 1 || writing_algo_ == 2);
+		has_dirty_ = (writing_algo_ % 2 == 1);
 		if (has_dirty_) {
 			length_ += 1;
 		}
@@ -242,7 +243,7 @@ public:
 		case 0: //直接映射，不需要替换算法
 			replacer_ = nullptr;
 			break;
-		case 1: //全相联，只有一个LRU
+		case 3: //全相联，只有一个LRU
 			replacer_ = new Replacer*;
 			switch (replacing_algo_) {
 			case 0:
@@ -259,7 +260,7 @@ public:
 			}
 			break;
 		default: // 4-way or 8-way
-			if (mapping_algo_ == 3) { // 8-way
+			if (mapping_algo_ == 2) { // 8-way
 				ways = 8;
 				ways_bit = 3;
 			}
@@ -289,6 +290,23 @@ public:
 		}
 	}
 
+	void print_info() const {
+		const char* str_m[] = { "直接映射","4-way组关联","8-way组关联","全关联" };
+		const char* str_r[] = { "LRU","随机替换","二叉树替换" };
+		const char* str_w[] = { "写不分配+写直达","写不分配+写回","写分配+写直达","写分配+写回" };
+		cout << "[Cache信息]" << endl;
+		cout << "总容量128KB，块大小" << block_size_ << "B\n";
+		cout << "映射规则：" << str_m[mapping_algo_] << endl;
+		cout << "替换算法：" << str_r[replacing_algo_] << endl;
+		cout << "写策略：" << str_w[writing_algo_] << endl;
+		//cout << "$" << block_size_ << " " << str_m[mapping_algo_] << " " << str_r[replacing_algo_] << " " << str_w[writing_algo_] << " " << length_ * (n_ >> 3) << endl;
+		cout << "每个Cache line需要" << tag_len_ << "比特Tag";
+		if (has_dirty_) {
+			cout << "、1比特Dirty位";
+		}
+		cout << "和1比特Valid位，共" << length_ << "×" << n_ << "÷8=" << length_ * (n_ >> 3) << "字节元数据\n\n";
+	}
+
 	bool read(const uint64_t addr) {
 		bool hit = false;
 		unsigned char* line;
@@ -305,7 +323,7 @@ public:
 				load(index, tag);
 			}
 			break;
-		case 1: // 全相联
+		case 3: // 全相联
 			for (auto i = last_visit_, j = i + n_; i < j; ++i) {
 				auto ind = i % n_;
 				line = data_[ind];
@@ -332,7 +350,7 @@ public:
 			}
 			break;
 		default: // 4-way or 8-way
-			if (mapping_algo_ == 3) { // 8-way
+			if (mapping_algo_ == 2) { // 8-way
 				ways = 8;
 				ways_bit = 3;
 			}
@@ -392,7 +410,7 @@ public:
 				}
 			}
 			break;
-		case 1: // 全相联
+		case 3: // 全相联
 			for (auto i = last_visit_, j = i + n_; i < j; ++i) {
 				auto ind = i % n_;
 				line = data_[ind];
@@ -426,7 +444,7 @@ public:
 			break;
 		default:
 			// 4-way
-			if (mapping_algo_ == 3) {// 8-way
+			if (mapping_algo_ == 2) {// 8-way
 				ways = 8;
 				ways_bit = 3;
 			}
@@ -530,7 +548,7 @@ public:
 uint64_t hextoi(const char* str) { // convert base-16 to base-10
 	uint64_t num = 0;
 	char a;
-	for (auto i = 2;; i++) {
+	for (auto i = 0;; i++) {
 		a = str[i];
 		if (a) {
 			if (a - 'a' >= 0) {
@@ -558,7 +576,7 @@ int BT::h_ = 0;
 #if false
 int main() {
 	srand(0); // 保证实验结果的可重复性
-	auto path = "C:\\Users\\johna\\Data\\astar.trace";
+	auto path = "C:\\Users\\johna\\Data\\bodytrack_1m.trace";
 	ifstream trace_file;
 	trace_file.open(path);
 	if (!trace_file.is_open()) {
@@ -572,26 +590,31 @@ int main() {
 	uint64_t iaddr;
 	bool hit;
 	int hit_count = 0, total_count = 0;
-	Cache cache(8, 0, 0, 1);
+	Cache cache(8, 0, 2, 1);
+	cache.print_info();
 	while (!trace_file.eof()) {
 		trace_file >> rw >> addr;
-		iaddr = hextoi(addr);
-		if (rw == 'r') {
-			hit = cache.read(iaddr);
+		if (addr[0] == 'x') {
+			iaddr = hextoi(addr + 1);
+			rw = 'r';
 		}
 		else {
-			hit = cache.write(iaddr);
+			iaddr = hextoi(addr + 2);
 		}
 		++total_count;
-		if(hit) {
-			++hit_count;
+		switch (rw) {
+		case 'r':
+		case 'l':
+			hit = cache.read(iaddr);
+			break;
+		case 'w':
+		case 's':
+			hit = cache.write(iaddr);
+			break;
+		default:
+			cout << "Error on line " << total_count << endl;
+			return 0;
 		}
-		//if (hit) {
-		//	cout << "Hit" << endl;
-		//}
-		//else {
-		//	cout << "Miss" << endl;
-		//}
 	}
 	cout << "[模拟结果]\n";
 	cout << "一共" << total_count << "次读/写操作，其中" << hit_count << "次命中，" << total_count - hit_count << "次缺失，命中率为" <<
@@ -605,9 +628,9 @@ int main(int argc, char* argv[]) {
 	if (argc < 7) {
 		cout << "应该有6个输入参数，依次为：" << endl;
 		cout << "* 块大小\t比如8、32、64等" << endl;
-		cout << "* 映射规则\t用代号表示：0-直接映射，1-全关联，2-四路组关联，3-八路组关联" << endl;
+		cout << "* 映射规则\t用代号表示：0-直接映射，1-四路组关联，2-八路组关联，3-全关联" << endl;
 		cout << "* 替换算法\t用代号表示：0-LRU，1-随机替换，2-二叉树替换" << endl;
-		cout << "* 写策略\t用代号表示：0-写不分配+写直达，1-写分配+写回，2-写不分配+写回，3-写分配+写直达" << endl;
+		cout << "* 写策略\t用代号表示：0-写不分配+写直达，1-写不分配+写回，2-写分配+写直达，3-写分配+写回" << endl;
 		cout << "* 输入trace文件路径" << endl;
 		cout << "* 输出log文件路径" << endl;
 		return 0;
@@ -624,33 +647,30 @@ int main(int argc, char* argv[]) {
 		cout << "无法打开log文件" << endl;
 		return 0;
 	}
-	auto block_size = atoi(argv[1]);
-	auto mapping_algo = atoi(argv[2]);
-	auto replacing_algo = atoi(argv[3]);
-	auto writing_algo = atoi(argv[4]);
-	const char* str_m[] = { "直接映射","全关联","4-way组关联","8-way组关联" };
-	const char* str_r[] = { "LRU","随机替换","二叉树替换" };
-	const char* str_w[] = { "写不分配+写直达","写分配+写回","写不分配+写回","写分配+写直达" };
-	cout << "[Cache信息]" << endl;
-	cout << "总容量128KB，块大小" << block_size << "B\n";
-	cout << "映射规则：" << str_m[mapping_algo] << endl;
-	cout << "替换算法：" << str_r[replacing_algo] << endl;
-	cout << "写策略：" << str_w[writing_algo] << endl << endl;
 	char rw;
 	char addr[15];
 	uint64_t iaddr;
 	bool hit;
 	int hit_count = 0, total_count = 0;
-	Cache cache(block_size, mapping_algo, replacing_algo, writing_algo);
+	Cache cache(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
+	cache.print_info();
 	while (!trace_file.eof()) {
 		trace_file >> rw >> addr;
-		iaddr = hextoi(addr);
+		if (addr[0] == 'x') {
+			iaddr = hextoi(addr + 1);
+			rw = 'r';
+		}
+		else {
+			iaddr = hextoi(addr + 2);
+		}
 		++total_count;
 		switch (rw) {
 		case 'r':
+		case 'l':
 			hit = cache.read(iaddr);
 			break;
 		case 'w':
+		case 's':
 			hit = cache.write(iaddr);
 			break;
 		default:
