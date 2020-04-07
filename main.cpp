@@ -1,5 +1,6 @@
 #include <iostream>
 #include <fstream>
+#include <ctime>
 using namespace std;
 
 constexpr auto N = 128 * 1024;
@@ -576,7 +577,7 @@ int BT::h_ = 0;
 #if false
 int main() {
 	srand(0); // 保证实验结果的可重复性
-	auto path = "C:\\Users\\johna\\Data\\bodytrack_1m.trace";
+	auto path = "C:\\Users\\johna\\Data\\perlbench.trace";
 	ifstream trace_file;
 	trace_file.open(path);
 	if (!trace_file.is_open()) {
@@ -590,10 +591,14 @@ int main() {
 	uint64_t iaddr;
 	bool hit;
 	int hit_count = 0, total_count = 0;
-	Cache cache(8, 0, 2, 1);
+	Cache cache(8, 0, 0, 3);
 	cache.print_info();
+	auto start_time = clock();
 	while (!trace_file.eof()) {
 		trace_file >> rw >> addr;
+		if (addr[0] == 0) {
+			break;
+		}
 		if (addr[0] == 'x') {
 			iaddr = hextoi(addr + 1);
 			rw = 'r';
@@ -615,10 +620,15 @@ int main() {
 			cout << "Error on line " << total_count << endl;
 			return 0;
 		}
+		if (hit) {
+			++hit_count;
+		}
 	}
 	cout << "[模拟结果]\n";
 	cout << "一共" << total_count << "次读/写操作，其中" << hit_count << "次命中，" << total_count - hit_count << "次缺失，命中率为" <<
 		double(hit_count) / total_count << "，缺失率为" << 1 - double(hit_count) / total_count << endl;
+	cout << "模拟耗时：" << clock() - start_time << "ms\n";
+	trace_file.close();
 	system("pause");
 	return 0;
 }
@@ -654,8 +664,12 @@ int main(int argc, char* argv[]) {
 	int hit_count = 0, total_count = 0;
 	Cache cache(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), atoi(argv[4]));
 	cache.print_info();
+	auto start_time = clock();
 	while (!trace_file.eof()) {
 		trace_file >> rw >> addr;
+		if (addr[0] == 0) {
+			break;
+		}
 		if (addr[0] == 'x') {
 			iaddr = hextoi(addr + 1);
 			rw = 'r';
@@ -685,9 +699,13 @@ int main(int argc, char* argv[]) {
 			log_file << "Miss" << endl;
 		}
 	}
+	cout << "[模拟耗时] " << clock() - start_time << "ms\n\n";
 	cout << "[模拟结果]\n";
 	cout << "一共" << total_count << "次读/写操作，其中" << hit_count << "次命中，" << total_count - hit_count << "次缺失，命中率为" <<
-		double(hit_count) / total_count << "，缺失率为" << 1 - double(hit_count) / total_count << endl;
+		double(hit_count) / total_count << "，缺失率为" << 1 - double(hit_count) / total_count << endl << endl;
+	cout.flush();
+	trace_file.close();
+	log_file.close();
 	return 0;
 }
 #endif
